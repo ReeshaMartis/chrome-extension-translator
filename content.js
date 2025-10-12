@@ -1,5 +1,8 @@
 console.log("Extension loaded!");
 
+// ----------------------
+// Banner setup
+// ----------------------
 const banner = document.createElement("div");
 banner.style.position = "fixed";
 banner.style.display = "flex";
@@ -12,7 +15,7 @@ banner.style.color = "white";
 banner.style.padding = "10px";
 banner.style.borderRadius = "8px";
 banner.style.zIndex = "9999";
-banner.style.cursor = "pointer";
+banner.style.cursor = "default"; // not clickable now
 document.body.appendChild(banner);
 
 // --- Add Close Button ---
@@ -22,60 +25,110 @@ closeBtn.style.marginLeft = "8px";
 closeBtn.style.cursor = "pointer";
 closeBtn.style.fontWeight = "bold";
 closeBtn.style.color = "#ff5555";
-
-// Put close button inside banner
 banner.appendChild(closeBtn);
 
 // --- Handle close button click ---
 closeBtn.addEventListener("click", (event) => {
-  event.stopPropagation(); // prevent banner's click (score increase)
-  banner.remove(); // hides the banner
+  event.stopPropagation(); // prevent any other click effects
+  banner.remove();
 });
 
-// 🧠 Step 1: Load or initialize scores
+// ----------------------
+// Score management
+// ----------------------
 chrome.storage.local.get(["highScore"], (result) => {
   const highScore = result.highScore ?? 0;
-  const currentScore = 0; // Always start fresh each time the page loads
+  const currentScore = 0; // always start fresh per page load
 
-  // Save this initial state
   chrome.storage.local.set({ score: currentScore, highScore }, () => {
     updateBanner(currentScore, highScore);
   });
 });
 
-// 🧩 Step 2: Add click handler to update score
-banner.addEventListener("click", () => {
-  chrome.storage.local.get(["score", "highScore"], (result) => {
-    let newScore = (result.score || 0) + 1;
-    let newHigh = result.highScore || 0;
-
-    if (newScore > newHigh) {
-      newHigh = newScore;
-      console.log("🎉 New high score!");
-    }
-
-    chrome.storage.local.set({ score: newScore, highScore: newHigh }, () => {
-      updateBanner(newScore, newHigh);
-      console.log(`Updated → score: ${newScore}, highScore: ${newHigh}`);
-    });
-  });
-});
-
-// 🪄 Helper function to update text
 function updateBanner(score, highScore) {
-  banner.innerText = `🎯 Score: ${score} | 🏆 High: ${highScore}\n(Click to increase)`;
-  banner.appendChild(closeBtn);
+  banner.innerText = `🎯 Score: ${score} | 🏆 High: ${highScore}`;
+  banner.appendChild(closeBtn); // keep close button
 }
 
-// helper function to read and collect text nodes
-function getTextNodes(){
-  const walker = document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,null,false);
+// ----------------------
+// Helper: collect text nodes
+// ----------------------
+function getTextNodes() {
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
   const textNodes = [];
-  while(walker.nextNode()){
+  while (walker.nextNode()) {
     const node = walker.currentNode;
-    if (node.nodeValue.trim().split(/\s+/).length<3) {
+    
+    // Skip if the text node is inside a link
+    if (node.parentNode.closest("a")) continue;
+    
+    if (node.nodeValue.trim().split(/\s+/).length < 3) { // only small words/phrases
       textNodes.push(node);
     }
   }
   return textNodes;
 }
+
+// ----------------------
+// Phase 1: Game word functions
+// ----------------------
+
+// Pick random words for the game
+function pickGameWords(textNodes) {
+  const maxWords = 10;
+  const numWords = Math.min(Math.floor(textNodes.length / 2), maxWords);
+
+  const picked = [];
+  const usedIndices = new Set();
+
+  while (picked.length < numWords && picked.length < textNodes.length) {
+    const randIndex = Math.floor(Math.random() * textNodes.length);
+    if (!usedIndices.has(randIndex)) {
+      picked.push(textNodes[randIndex]);
+      usedIndices.add(randIndex);
+    }
+  }
+
+  return picked;
+}
+
+// Highlight a single word
+function highlightWord(node) {
+  const span = document.createElement("span");
+  span.innerText = node.nodeValue;
+  span.style.backgroundColor = "#ffeb3a";
+  span.style.cursor = "pointer";
+
+  node.parentNode.replaceChild(span, node);
+  return span;
+}
+
+// Enable game mode
+function gameModeWords() {
+  const textNodes = getTextNodes();
+  const gameNodes = pickGameWords(textNodes);
+
+  gameNodes.forEach(node => {
+    const span = highlightWord(node);
+    span.addEventListener("click", () => {
+      const userTranslation = prompt(`Translate this word: "${span.innerText}"`);
+      console.log("User entered:", userTranslation);
+
+      // --- Increment score ---
+      chrome.storage.local.get(["score", "highScore"], (result) => {
+        let newScore = (result.score || 0) + 1;
+        let newHigh = result.highScore || 0;
+        if (newScore > newHigh) newHigh = newScore;
+
+        chrome.storage.local.set({ score: newScore, highScore: newHigh }, () => {
+          updateBanner(newScore, newHigh);
+        });
+      });
+    });
+  });
+}
+
+// ----------------------
+// Start game mode
+// ----------------------
+gameModeWords();
